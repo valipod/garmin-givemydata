@@ -528,8 +528,6 @@ class GarminClient:
                     print()
                     print("  MFA required — enter code in the browser window...")
 
-            if mfa_prompted and poll % 15 == 0 and poll > 0:
-                print("  Still waiting for MFA code...")
 
             if mfa_prompted and poll > 0 and poll % 30 == 0:
                 log.debug("Stuck on SSO after MFA — trying to navigate to app...")

@@ -21,7 +21,9 @@ import logging
 import os
 import sys
 import time
+import zipfile
 from datetime import date, timedelta
+from io import BytesIO
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -57,6 +59,29 @@ def _get_data_dir() -> Path:
 DATA_DIR = _get_data_dir()
 PROFILE_DIR = DATA_DIR / "browser_profile"
 SESSION_FILE = DATA_DIR / "garmin_session.json"
+
+
+def _get_fit_dir() -> Path:
+    """Return the FIT file directory, configurable via GARMIN_FIT_DIR in .env or environment."""
+    env_dir = os.environ.get("GARMIN_FIT_DIR")
+    if env_dir:
+        p = Path(env_dir)
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+    return DATA_DIR / "fit"
+
+
+def _extract_fit_from_zip(data: bytes) -> bytes | None:
+    """Extract the first .fit file from a ZIP archive. Returns None if not a valid ZIP."""
+    try:
+        with zipfile.ZipFile(BytesIO(data)) as zf:
+            for name in zf.namelist():
+                if name.lower().endswith(".fit"):
+                    return zf.read(name)
+    except zipfile.BadZipFile:
+        pass
+    return None
+
 
 # ─── Fetch profiles ──────────────────────────────────────────
 FETCH_PROFILES = {
@@ -460,7 +485,7 @@ examples:
             else:
                 activities = act_result
 
-            fit_dir = DATA_DIR / "fit"
+            fit_dir = _get_fit_dir()
             fit_dir.mkdir(exist_ok=True)
 
             print(f"Downloading {len(activities)} FIT file(s)...")
@@ -474,8 +499,8 @@ examples:
                     safe_name = "_" + "".join(c if c.isalnum() or c in "-_ " else "" for c in name).strip().replace(
                         " ", "_"
                     )
-                safe_date = date_str[:10] if date_str else str(aid)
-                filename = f"{safe_date}_{aid}{safe_name}.zip"
+                safe_date = date_str[:19].replace(" ", "T").replace(":", "-") if date_str else str(aid)
+                filename = f"{safe_date}_{aid}{safe_name}.fit"
                 filepath = fit_dir / filename
 
                 if filepath.exists():
@@ -486,8 +511,13 @@ examples:
                 data = client.download_file(api_path)
 
                 if data:
-                    with open(filepath, "wb") as f:
-                        f.write(data)
+                    fit_data = _extract_fit_from_zip(data)
+                    if fit_data:
+                        with open(filepath, "wb") as f:
+                            f.write(fit_data)
+                    else:
+                        with open(filepath, "wb") as f:
+                            f.write(data)
                     downloaded += 1
                     print(f"  {filename}")
 
@@ -540,7 +570,7 @@ examples:
 
         # Download FIT files for activities (unless --no-files)
         if not args.no_files and profile in ("all", "activities"):
-            fit_dir = DATA_DIR / "fit"
+            fit_dir = _get_fit_dir()
             fit_dir.mkdir(exist_ok=True)
 
             activities = db_query(
@@ -549,7 +579,7 @@ examples:
             )
 
             # Only download FIT files we don't already have
-            existing_fits = {f.stem.split("_")[1] for f in fit_dir.glob("*.zip")} if fit_dir.exists() else set()
+            existing_fits = {f.stem.split("_")[1] for f in fit_dir.glob("*.fit")} if fit_dir.exists() else set()
             new_activities = [
                 (a["activity_id"], a["activity_name"], a["start_time_local"])
                 for a in activities
@@ -568,16 +598,21 @@ examples:
                         safe_name = "_" + "".join(c if c.isalnum() or c in "-_ " else "" for c in name).strip().replace(
                             " ", "_"
                         )
-                    safe_date = date_str[:10] if date_str else str(aid)
-                    filename = f"{safe_date}_{aid}{safe_name}.zip"
+                    safe_date = date_str[:19].replace(" ", "T").replace(":", "-") if date_str else str(aid)
+                    filename = f"{safe_date}_{aid}{safe_name}.fit"
                     filepath = fit_dir / filename
 
                     api_path = f"/gc-api/download-service/files/activity/{aid}"
                     data = client.download_file(api_path)
 
                     if data:
-                        with open(filepath, "wb") as f:
-                            f.write(data)
+                        fit_data = _extract_fit_from_zip(data)
+                        if fit_data:
+                            with open(filepath, "wb") as f:
+                                f.write(fit_data)
+                        else:
+                            with open(filepath, "wb") as f:
+                                f.write(data)
                         downloaded += 1
 
                     if downloaded > 0 and downloaded % 10 == 0:
@@ -596,8 +631,8 @@ examples:
 
     # Final status
     final = get_db_status()
-    fit_dir = DATA_DIR / "fit"
-    fit_count = len(list(fit_dir.glob("*.zip"))) if fit_dir.exists() else 0
+    fit_dir = _get_fit_dir()
+    fit_count = len(list(fit_dir.glob("*.fit"))) if fit_dir.exists() else 0
 
     print("\nDatabase status:")
     print(f"  Daily summaries: {final['rows']} days")
