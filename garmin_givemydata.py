@@ -630,7 +630,8 @@ examples:
                 filename = f"{safe_date}_{aid}{safe_name}.fit"
                 filepath = fit_dir / filename
 
-                if filepath.exists():
+                # Past years are archived into per-year folders by the analysis repo.
+                if filepath.exists() or (fit_dir / safe_date[:4] / filename).exists():
                     print(f"  {filename} (already exists)")
                     continue
 
