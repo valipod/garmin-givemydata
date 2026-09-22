@@ -40,18 +40,23 @@ def profile_graphql(display_name: str) -> dict:
     }
 
 
+def activities_search_url(start_date: str, end_date: str, limit: int = 100, offset: int = 0) -> str:
+    """Build the activities search URL with date filtering."""
+    return f"/gc-api/activitylist-service/activities/search/activities?limit={limit}&start={offset}&startDate={start_date}&endDate={end_date}"
+
+
 def full_range_rest(display_name: str, start_date: str, end_date: str) -> dict:
     """REST endpoints that support full date ranges."""
     dn = display_name
     return {
-        # Note: this returns max ~20-100 activities per page. Pagination
-        # is handled in client.py fetch_all() to get ALL activities.
-        "activities": "/gc-api/activitylist-service/activities/search/activities?limit=100&start=0",
+        # Pagination is handled in client.py fetch_all().
+        "activities": activities_search_url(start_date, end_date),
         "weight_range": f"/gc-api/weight-service/weight/dateRange?startDate={start_date}&endDate={end_date}",
         "weight_latest": f"/gc-api/weight-service/weight/latest?date={end_date}",
         "vo2max_trend": f"/gc-api/metrics-service/metrics/maxmet/daily/{start_date}/{end_date}",
         "personal_records": f"/gc-api/personalrecord-service/personalrecord/prs/{dn}",
         "personal_record_types": f"/gc-api/personalrecord-service/personalrecordtype/prtypes/{dn}",
+        "lactate_threshold": "/gc-api/biometric-service/biometric/latestLactateThreshold",
     }
 
 
@@ -68,7 +73,6 @@ def full_range_graphql(display_name: str, start_date: str, end_date: str) -> dic
         "vo2max_cycling": f'query{{vo2MaxScalar(startDate:"{start_date}", endDate:"{end_date}", sport:"CYCLING")}}',
         "weight": f'query{{weightScalar(startDate:"{start_date}", endDate:"{end_date}")}}',
         "blood_pressure": f'query{{bloodPressureScalar(startDate:"{start_date}", endDate:"{end_date}")}}',
-        "activities_range": f'query{{activitiesScalar(displayName:"{dn}", startTimestampLocal:"{start_date}T00:00:00.00", endTimestampLocal:"{end_date}T23:59:59.99")}}',
         "activity_stats_all": f'query{{activityStatsScalar(aggregation:"daily", startDate:"{start_date}", endDate:"{end_date}", activityType:"all")}}',
         "activity_stats_running": f'query{{activityStatsScalar(aggregation:"daily", startDate:"{start_date}", endDate:"{end_date}", activityType:"running")}}',
         "activity_stats_cycling": f'query{{activityStatsScalar(aggregation:"daily", startDate:"{start_date}", endDate:"{end_date}", activityType:"cycling")}}',
@@ -119,12 +123,15 @@ def daily_rest(display_name: str, date: str) -> dict:
         "intensity_minutes": f"/gc-api/wellness-service/wellness/daily/im/{date}",
         "hydration": f"/gc-api/usersummary-service/usersummary/hydration/allData/{date}",
         "body_battery_events": f"/gc-api/wellness-service/wellness/bodyBattery/events/{date}",
+        "nutrition_meals": f"/gc-api/nutrition-service/meals/{date}",
+        "nutrition": f"/gc-api/nutrition-service/food/logs/{date}",
         "fitness_age": f"/gc-api/fitnessage-service/fitnessage/{date}",
         "wellness_activity": f"/gc-api/wellnessactivity-service/activity/summary/{date}",
         "daily_movement": f"/gc-api/wellness-service/wellness/dailyMovement?calendarDate={date}",
         "endurance_score": f"/gc-api/metrics-service/metrics/endurancescore?calendarDate={date}",
         "hill_score": f"/gc-api/metrics-service/metrics/hillscore?calendarDate={date}",
         "race_predictions": f"/gc-api/metrics-service/metrics/racepredictions/daily/{dn}?fromCalendarDate={date}&toCalendarDate={date}",
+        "hrv_timeline": f"/gc-api/hrv-service/hrv/{date}",
     }
 
 
@@ -136,11 +143,13 @@ def daily_graphql(display_name: str, date: str) -> dict:
         "sleep_detail": f'query{{sleepScalar(date:"{date}", sleepOnly: false)}}',
         "training_status_daily": f'query{{trainingStatusDailyScalar(calendarDate:"{date}")}}',
         "daily_events": f'query{{dailyEventsScalar(date:"{date}")}}',
-        "health_status": f'''query {{
-            healthStatusSummary(calendarDate:"{date}") {{
-                calendarDate overallStatus metricsMap
-            }}
-        }}''',
+        # ``HealthStatusSummaryDTO`` no longer exposes ``calendarDate``,
+        # ``overallStatus`` or ``metricsMap`` (Garmin renamed the schema); asking
+        # for them returns a FieldUndefined validation error for every day, which
+        # was being stored as a row. The current shape is a ``metrics`` list of
+        # ``{type, status, value}``. Days without data return a null node, which
+        # the GraphQL unwrapper drops, so nothing is written.
+        "health_status": f'query{{healthStatusSummary(calendarDate:"{date}"){{metrics{{type status value}}}}}}',
         "activity_trends_all": f'query{{activityTrendsScalar(activityType:"all",date:"{date}")}}',
         "activity_trends_running": f'query{{activityTrendsScalar(activityType:"running",date:"{date}")}}',
         "activity_trends_cycling": f'query{{activityTrendsScalar(activityType:"cycling",date:"{date}")}}',

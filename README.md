@@ -1,4 +1,4 @@
-# garmin-givemydata
+# garmin-givemydata (100% Working)
 
 [![CI](https://github.com/nrvim/garmin-givemydata/actions/workflows/ci.yml/badge.svg)](https://github.com/nrvim/garmin-givemydata/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/garmin-givemydata.svg)](https://pypi.org/project/garmin-givemydata/)
@@ -18,7 +18,7 @@ You paid for the hardware. You generated the data with your body. You should be 
 
 This project gets your data out of Garmin Connect and into a local SQLite database where **you** own it and **AI can analyze it** through an MCP server for Claude Code.
 
-**47 tables, 10+ years of history, 44 MCP tools for AI analysis. Your data stays on your machine.**
+**50 tables, 10+ years of history, 45 MCP tools for AI analysis. Your data stays on your machine.**
 
 ## The Problem
 
@@ -60,6 +60,21 @@ First run prompts for credentials, launches a headless browser, and fetches your
 
 Add the MCP server to Claude Code, Claude Desktop, or any MCP client. The config depends on how you installed:
 
+**Claude Code (one-liner)** — registers the server at user scope so it's available in every project:
+
+```bash
+# pip / brew install
+claude mcp add -s user garmin -- garmin-mcp
+
+# git clone
+claude mcp add -s user garmin \
+  -e GARMIN_DATA_DIR=/absolute/path/to/garmin-givemydata \
+  -- /absolute/path/to/garmin-givemydata/venv/bin/python \
+     /absolute/path/to/garmin-givemydata/run_mcp.py
+```
+
+Verify with `claude mcp list`. Skip the manual JSON below.
+
 **Homebrew or pip install** — `garmin-mcp` is already in your PATH:
 
 ```json
@@ -72,7 +87,7 @@ Add the MCP server to Claude Code, Claude Desktop, or any MCP client. The config
 }
 ```
 
-**Git clone** — use absolute paths to the venv:
+**Git clone** — use absolute paths to the venv and set `GARMIN_DATA_DIR` so the MCP server finds your database:
 
 ```json
 {
@@ -80,11 +95,16 @@ Add the MCP server to Claude Code, Claude Desktop, or any MCP client. The config
     "garmin": {
       "command": "/absolute/path/to/garmin-givemydata/venv/bin/python",
       "args": ["/absolute/path/to/garmin-givemydata/run_mcp.py"],
-      "cwd": "/absolute/path/to/garmin-givemydata"
+      "cwd": "/absolute/path/to/garmin-givemydata",
+      "env": {
+        "GARMIN_DATA_DIR": "/absolute/path/to/garmin-givemydata"
+      }
     }
   }
 }
 ```
+
+> **Note:** `GARMIN_DATA_DIR` tells the MCP server where `garmin.db` lives. Without it, the server falls back to `~/.garmin-givemydata/` which may not be where your data is if you cloned to a custom location.
 
 Save this as:
 - **Claude Code:** `.mcp.json` in your project root, or `~/.claude/settings.json` under `mcpServers` for global access
@@ -110,7 +130,10 @@ Restart your client and run `/mcp` to approve the server. Then ask:
     "garmin": {
       "command": "C:\\Users\\jane\\code\\garmin-givemydata\\venv\\Scripts\\python.exe",
       "args": ["C:\\Users\\jane\\code\\garmin-givemydata\\run_mcp.py"],
-      "cwd": "C:\\Users\\jane\\code\\garmin-givemydata"
+      "cwd": "C:\\Users\\jane\\code\\garmin-givemydata",
+      "env": {
+        "GARMIN_DATA_DIR": "C:\\Users\\jane\\code\\garmin-givemydata"
+      }
     }
   }
 }
@@ -130,13 +153,13 @@ Any client supporting [MCP stdio transport](https://spec.modelcontextprotocol.io
 
 ## What You Get
 
-- **ALL your data** in one command — 47 tables, activities with splits/weather/HR zones, original FIT files
+- **ALL your data** in one command — 50 tables, activities with splits/weather/HR zones/GPS trackpoints, original FIT files
 - **10+ years** of history fetched automatically, smart incremental sync after that
-- **44 MCP tools** for AI analysis — not just raw data, but tools with clinical context, anomaly detection, and professional training metrics
+- **45 MCP tools** for AI analysis — not just raw data, but tools with clinical context, anomaly detection, and professional training metrics
 - **Export to anything** — CSV, JSON, GPX, TCX from your local database
 - **Your data stays local** — nothing is sent anywhere
 
-## MCP Tools (44)
+## MCP Tools (45)
 
 The MCP server gives AI assistants deep access to your health data. Every tool returns **data + context** — not just numbers, but trend direction, anomaly flags, clinical thresholds, and goal attainment.
 
@@ -146,7 +169,7 @@ The MCP server gives AI assistants deep access to your health data. Every tool r
 | Tool | What It Does |
 |------|-------------|
 | `garmin_sync` | Check data freshness and pull latest data from Garmin — always shows when the last sync happened. Use `refresh=False` to just check status |
-| `garmin_schema` | Show all 47 tables, columns, and row counts |
+| `garmin_schema` | Row counts for all 50 tables; pass `tables="sleep,stress"` for their columns |
 | `garmin_query` | Run any read-only SELECT query (read-only enforced at the SQLite engine level) |
 
 </details>
@@ -184,7 +207,7 @@ The MCP server gives AI assistants deep access to your health data. Every tool r
 </details>
 
 <details open>
-<summary><strong>Training & Performance (13 tools)</strong> — includes tools unique to this project</summary>
+<summary><strong>Training & Performance (14 tools)</strong> — includes tools unique to this project</summary>
 
 | Tool | What It Does |
 |------|-------------|
@@ -193,6 +216,7 @@ The MCP server gives AI assistants deep access to your health data. Every tool r
 | `garmin_compare` | **Side-by-side period comparison** — any two date ranges, all metrics, deltas + % changes |
 | `garmin_activities` | List/filter activities by type and date — power, HR, training load, location |
 | `garmin_activity_detail` | Deep-dive: splits, HR zones, weather, exercise sets in one call |
+| `garmin_activity_trackpoints` | **GPS trackpoints (~1Hz)** — lat/lon, altitude, speed, HR, cadence, power, temperature in chronological order. Paginated. Use for elevation profiles, HR drift, GPS tracks, climb segmentation |
 | `garmin_race_predictions` | 5K/10K/half/marathon times with human-readable formatting and trend |
 | `garmin_endurance_score` | Endurance score with classification tier and trend |
 | `garmin_hill_score` | Hill score with endurance and strength sub-scores |
@@ -237,6 +261,9 @@ garmin-givemydata --profile health             # health metrics only
 garmin-givemydata --profile activities         # activities + FIT files only
 garmin-givemydata --profile sleep              # sleep data only
 garmin-givemydata --no-files                   # skip FIT file downloads
+garmin-givemydata                              # parses trackpoints for newly downloaded FIT files by default
+garmin-givemydata --no-trackpoints             # skip trackpoint parsing during sync
+garmin-givemydata --rebuild-trackpoints        # full rebuild: reparse all downloaded FIT files
 garmin-givemydata --status                     # check database contents
 ```
 
@@ -300,7 +327,7 @@ fit/                   # Original FIT files (lossless)
 </details>
 
 <details>
-<summary>Comprehensive data — 47 tables</summary>
+<summary>Comprehensive data — 50 tables</summary>
 
 | Category | Data |
 |----------|------|
@@ -321,10 +348,12 @@ fit/                   # Original FIT files (lossless)
 | **Activity HR Zones** | Time spent in each HR zone per activity |
 | **Activity Weather** | Temperature, humidity, wind speed/direction during activity |
 | **Activity Exercise Sets** | Strength training: exercise name, reps, weight, duration per set |
+| **Activity Trackpoints** | GPS samples at ~1Hz: lat/lon, altitude, distance, speed, HR, cadence, power, temperature (parsed from FIT files) |
 | **Weight** | Weight, BMI, body fat, body water, bone mass, muscle mass |
 | **VO2max** | Running and cycling VO2max trend over time |
 | **Blood Pressure** | Systolic, diastolic, pulse |
 | **Calories** | Total, active, BMR, consumed, remaining |
+| **Nutrition** | Daily consumed calories/protein/fat/carbs, plus a per-food log: every logged food with servings, time, and full macro/micronutrient breakdown (fiber, sugars, fats, sodium, potassium, cholesterol, calcium, iron, vitamins A/C/D) |
 | **Fitness Age** | Chronological age vs fitness age |
 | **Personal Records** | All PRs across all activity types |
 | **Earned Badges** | All badges earned with date and category |
@@ -348,8 +377,8 @@ garmin-givemydata/
 │   ├── client.py               #   GarminClient (login, fetch, export)
 │   └── endpoints.py            #   API endpoint definitions
 ├── garmin_mcp/                 # MCP server + database layer
-│   ├── db.py                   #   SQLite schema (47 tables), upsert helpers
-│   ├── server.py               #   FastMCP server with 44 tools
+│   ├── db.py                   #   SQLite schema (50 tables), upsert helpers
+│   ├── server.py               #   FastMCP server with 45 tools
 │   ├── export.py               #   CSV, JSON, GPX, TCX export
 │   ├── import_json.py          #   JSON → SQLite bulk import
 │   └── sync.py                 #   Incremental sync engine
@@ -365,7 +394,7 @@ garmin-givemydata/
 Garmin Connect ──→ SQLite (health + activity metrics)
                 └─→ fit/ (original FIT files, lossless)
 
-SQLite ──→ MCP server (AI queries via 44 tools)
+SQLite ──→ MCP server (AI queries via 45 tools)
        ├─→ CSV/JSON (--export)
        └─→ GPX/TCX (--export-gpx, --export-tcx)
 ```
@@ -456,6 +485,8 @@ If PowerShell blocks the activate script: `Set-ExecutionPolicy -ExecutionPolicy 
 
 **"Python not found"**: Make sure Python 3.10+ is on your PATH. macOS: `brew install python@3.12`. Ubuntu: `sudo apt install python3.12 python3.12-venv`.
 
+**`ensurepip is not available` / venv creation fails**: Your system Python is missing the venv module. Install the matching package: `sudo apt install python3.X-venv` (replace `X` with your minor version — `python3 --version` to check). On Ubuntu with Python 3.14, that's `python3.14-venv`. The `setup.sh` script auto-detects Python but can't auto-install the venv package.
+
 **403 or session errors**: Session expired (often from IP change — `cf_clearance` is IP-bound). Delete the browser profile and re-login.
 
 **Chrome doesn't open (Linux/SSH)**: Install Xvfb: `sudo apt install xvfb`. The tool auto-spawns Xvfb at 1920x1080 when no display is available, or use `xvfb-run -a garmin-givemydata`.
@@ -493,7 +524,7 @@ If PowerShell blocks the activate script: `Set-ExecutionPolicy -ExecutionPolicy 
 <summary>How to help</summary>
 
 - **New endpoints**: Garmin has hundreds of internal APIs. Discover new ones via browser dev tools and add them to `endpoints.py`.
-- **More MCP tools**: The server has 44 tools including CTL/ATL/TSB, recovery signatures, and period comparison. Ideas: injury risk prediction, sleep optimization, race readiness scoring, overtraining detection.
+- **More MCP tools**: The server has 45 tools including CTL/ATL/TSB, recovery signatures, and period comparison. Ideas: injury risk prediction, sleep optimization, race readiness scoring, overtraining detection.
 - **MCP client integrations**: Test with OpenClaw, Cline, Continue, Cursor, or other clients.
 - **Other platforms**: ARM (Raspberry Pi), Docker, etc.
 - **Data visualization**: Dashboards, charts, reports from SQLite.

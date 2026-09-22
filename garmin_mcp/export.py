@@ -125,6 +125,20 @@ _CSV_COLUMN_MAP = {
         "manufacturer": "Manufacturer",
         "device_id": "Device ID",
     },
+    "activity_trackpoints": {
+        "activity_id": "Activity ID",
+        "seq": "Sequence",
+        "timestamp_utc": "Timestamp (UTC)",
+        "latitude": "Latitude (°)",
+        "longitude": "Longitude (°)",
+        "altitude_m": "Altitude (m)",
+        "distance_m": "Distance (m)",
+        "speed_mps": "Speed (m/s)",
+        "heart_rate_bpm": "Heart Rate (bpm)",
+        "cadence": "Cadence",
+        "power_w": "Power (W)",
+        "temperature_c": "Temperature (°C)",
+    },
     "hrv": {
         "calendar_date": "Date",
         "weekly_avg": "Weekly Avg (ms)",
@@ -237,6 +251,47 @@ _CSV_COLUMN_MAP = {
         "consumed": "Consumed (kcal)",
         "remaining": "Remaining (kcal)",
     },
+    "nutrition_daily": {
+        "calendar_date": "Date",
+        "calories": "Calories (kcal)",
+        "protein": "Protein (g)",
+        "fat": "Fat (g)",
+        "carbs": "Carbs (g)",
+    },
+    "nutrition_food_log": {
+        "calendar_date": "Date",
+        "logged_at": "Logged At (UTC)",
+        "meal_time": "Meal Time",
+        "food_name": "Food",
+        "brand_name": "Brand",
+        "food_type": "Food Type",
+        "food_source": "Source",
+        "food_id": "Food ID",
+        "log_id": "Log ID",
+        "serving_qty": "Servings",
+        "serving_unit": "Serving Unit",
+        "serving_base_units": "Serving Base Units",
+        "is_favorite": "Favorite",
+        "calories": "Calories (kcal)",
+        "protein": "Protein (g)",
+        "fat": "Fat (g)",
+        "carbs": "Carbs (g)",
+        "fiber": "Fiber (g)",
+        "sugar": "Sugar (g)",
+        "added_sugars": "Added Sugars (g)",
+        "saturated_fat": "Saturated Fat (g)",
+        "monounsaturated_fat": "Monounsaturated Fat (g)",
+        "polyunsaturated_fat": "Polyunsaturated Fat (g)",
+        "trans_fat": "Trans Fat (g)",
+        "cholesterol": "Cholesterol (mg)",
+        "sodium": "Sodium (mg)",
+        "potassium": "Potassium (mg)",
+        "calcium": "Calcium (mg)",
+        "iron": "Iron (mg)",
+        "vitamin_a": "Vitamin A (Garmin raw)",
+        "vitamin_c": "Vitamin C (Garmin raw)",
+        "vitamin_d": "Vitamin D (Garmin raw)",
+    },
     "hydration": {
         "calendar_date": "Date",
         "goal_ml": "Goal (ml)",
@@ -246,6 +301,27 @@ _CSV_COLUMN_MAP = {
         "calendar_date": "Date",
         "chronological_age": "Chronological Age",
         "fitness_age": "Fitness Age",
+    },
+    "earned_badges": {
+        "badge_id": "Badge ID",
+        "badge_key": "Badge Key",
+        "badge_name": "Badge Name",
+        "badge_category": "Category",
+        "earned_date": "Earned Date",
+        "earned_number": "Earned Count",
+    },
+    "challenges": {
+        "id": "Challenge ID",
+        "challenge_type": "Type",
+    },
+    "personal_record": {
+        "id": "Record ID",
+        "display_name": "Name",
+        "activity_type": "Activity Type",
+        "pr_type": "PR Type",
+        "value": "Value",
+        "pr_date": "Date",
+        "activity_id": "Activity ID",
     },
 }
 
@@ -317,6 +393,10 @@ def export_json_tables(output_dir: Path):
                     full = json.loads(raw)
                 except (json.JSONDecodeError, TypeError):
                     full = {}
+                # Some tables (e.g. activity_hr_zones) store a JSON array
+                # at the root. Wrap it so we can still attach __columns.
+                if not isinstance(full, dict):
+                    full = {"items": full}
                 # Add our structured columns on top (they're cleaner/normalized)
                 for k, v in row.items():
                     if k != "raw_json" and v is not None:
@@ -382,16 +462,14 @@ def download_activity_files(
 
     from garmin_client import GarminClient
 
-    project_dir = Path(__file__).parent.parent
-    profile_dir = project_dir / "browser_profile"
+    # Resolve credentials and browser profile from the real data directory
+    # (GARMIN_DATA_DIR / cwd / ~/.garmin-givemydata), not the installed package
+    # location. Reuses the main module's data-dir logic so pip/pipx/brew installs
+    # find the .env that lives next to the database. See issue #53.
+    from garmin_givemydata import PROFILE_DIR, load_env
 
-    env_file = project_dir / ".env"
-    if env_file.exists():
-        for line in env_file.read_text().splitlines():
-            line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                key, _, value = line.partition("=")
-                os.environ.setdefault(key.strip(), value.strip())
+    load_env()
+    profile_dir = PROFILE_DIR
 
     email = os.environ.get("GARMIN_EMAIL", "")
     password = os.environ.get("GARMIN_PASSWORD", "")

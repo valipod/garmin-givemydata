@@ -29,7 +29,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from garmin_client import GarminClient
-from garmin_mcp.db import get_connection, init_db, save_to_db
+from garmin_mcp.db import get_connection, init_db, record_fit_parse, save_to_db
 from garmin_mcp.db import query as db_query
 
 
@@ -146,6 +146,7 @@ def fetch_direct_to_db(
     conn,
     start_date: str,
     end_date: str,
+    save_raw: bool = False,
 ) -> None:
     """Fetch data and save each batch directly to SQLite."""
     counts = {}
@@ -182,6 +183,7 @@ def fetch_direct_to_db(
             end_date=end_date,
             on_batch=on_batch,
             known_activity_ids=known_activity_ids,
+            save_raw=save_raw,
         )
     else:
         # Calculate total chunks for progress reporting
@@ -209,6 +211,7 @@ def fetch_direct_to_db(
                 end_date=chunk_end.isoformat(),
                 on_batch=on_batch,
                 known_activity_ids=known_activity_ids,
+                save_raw=save_raw,
             )
 
             new_total = sum(counts.values())
@@ -219,6 +222,93 @@ def fetch_direct_to_db(
             cursor = chunk_start - timedelta(days=1)
 
         print("\n[100%] Done.")
+
+
+def _save_trackpoints_from_fit(conn, fit_path: Path) -> tuple[str, int]:
+    """Parse one downloaded FIT archive and store its trackpoints."""
+    from garmin_mcp.parse_activity_files import parse_trackpoints_from_fit_archive
+
+    try:
+        activity_id, trackpoints = parse_trackpoints_from_fit_archive(fit_path)
+    except Exception:
+        record_fit_parse(conn, fit_path.name, None, "failed", 0)
+        return "failed", 0
+
+    if activity_id is None or not trackpoints:
+        record_fit_parse(conn, fit_path.name, activity_id, "skipped", 0)
+        return "skipped", 0
+
+    count = save_to_db(conn, "activity_trackpoints", trackpoints, cal_date=str(activity_id))
+    record_fit_parse(conn, fit_path.name, activity_id, "ingested", count)
+    return "ingested", count
+
+
+def _parse_trackpoints_from_fit_dir(conn, fit_dir: Path) -> dict[str, int]:
+    """Parse all downloaded FIT archives in a directory."""
+    summary = {
+        "targeted": 0,
+        "ingested": 0,
+        "skipped": 0,
+        "failed": 0,
+        "rows": 0,
+    }
+
+    if not fit_dir.exists():
+        return summary
+
+    for fit_path in sorted(fit_dir.glob("*.zip")):
+        summary["targeted"] += 1
+        status, count = _save_trackpoints_from_fit(conn, fit_path)
+        if status == "ingested":
+            summary["ingested"] += 1
+            summary["rows"] += count
+        elif status == "skipped":
+            summary["skipped"] += 1
+        else:
+            summary["failed"] += 1
+
+    return summary
+
+
+def _backfill_unparsed_fit(conn, fit_dir: Path) -> dict[str, int]:
+    """Parse FIT archives present on disk but not yet recorded in ``fit_files``.
+
+    Covers files that exist without having been parsed into this database —
+    e.g. after wiping garmin.db but keeping fit/, restoring fit/ from another
+    machine, or an interrupted run. Idempotent: once a file is recorded (even as
+    'skipped' for a GPS-less activity) it is not parsed again.
+    """
+    summary = {"targeted": 0, "ingested": 0, "skipped": 0, "failed": 0, "rows": 0}
+
+    if not fit_dir.exists():
+        return summary
+
+    parsed = {r["filename"] for r in db_query(conn, "SELECT filename FROM fit_files")}
+
+    for fit_path in sorted(fit_dir.glob("*.zip")):
+        if fit_path.name in parsed:
+            continue
+        summary["targeted"] += 1
+        status, count = _save_trackpoints_from_fit(conn, fit_path)
+        if status == "ingested":
+            summary["ingested"] += 1
+            summary["rows"] += count
+        elif status == "skipped":
+            summary["skipped"] += 1
+        else:
+            summary["failed"] += 1
+
+    return summary
+
+
+def _print_trackpoint_summary(summary: dict[str, int], prefix: str = "") -> None:
+    print(
+        f"{prefix}Trackpoints: "
+        f"{summary['ingested']} ingested, "
+        f"{summary['skipped']} skipped, "
+        f"{summary['failed']} failed, "
+        f"{summary['rows']} points"
+    )
 
 
 def _log_sync(conn, sync_type, count):
@@ -255,6 +345,8 @@ examples:
   python garmin_givemydata.py                          # all data → SQLite + FIT files
   python garmin_givemydata.py --profile health          # health metrics only (no FIT)
   python garmin_givemydata.py --no-files                # API data only, skip FIT downloads
+  python garmin_givemydata.py --no-trackpoints          # skip FIT trackpoint parsing
+  python garmin_givemydata.py --rebuild-trackpoints     # reparse existing FIT files
   python garmin_givemydata.py --export ./my_data        # export DB to CSV + JSON
   python garmin_givemydata.py --export-gpx ./gpx        # export activities as GPX
   python garmin_givemydata.py --export-tcx ./tcx        # export activities as TCX
@@ -274,10 +366,20 @@ examples:
     fetch_group.add_argument("--days", type=int, help="Fetch last N days")
     fetch_group.add_argument("--since", type=str, help="Fetch from date (YYYY-MM-DD)")
     fetch_group.add_argument(
+        "--save-raw", action="store_true", help="Save raw JSON responses to debug/raw for debugging"
+    )
+    fetch_group.add_argument(
         "--no-files",
         action="store_true",
         help="Skip FIT file downloads (only fetch API data to SQLite)",
     )
+    fetch_group.add_argument(
+        "--no-trackpoints",
+        action="store_false",
+        dest="parse_trackpoints",
+        help="Skip GPS trackpoint parsing for newly downloaded FIT files",
+    )
+    fetch_group.set_defaults(parse_trackpoints=True)
 
     # Export options
     export_group = parser.add_argument_group("export options (from local database, no Garmin login needed)")
@@ -293,7 +395,9 @@ examples:
         help="Download FIT files only, skip health data sync",
     )
     fit_group.add_argument(
-        "--latest", action="store_true", help="Download only the latest FIT file (use with --fit-only)"
+        "--latest",
+        action="store_true",
+        help="Fetch only today's data (or download only the latest FIT file with --fit-only)",
     )
     fit_group.add_argument(
         "--date", type=str, help="Download FIT file for a specific date YYYY-MM-DD (use with --fit-only)"
@@ -302,6 +406,11 @@ examples:
     # Utility
     parser.add_argument("--json-import", type=str, help="Import existing JSON file to DB")
     parser.add_argument("--status", action="store_true", help="Show database status and exit")
+    parser.add_argument(
+        "--rebuild-trackpoints",
+        action="store_true",
+        help="Reparse all downloaded FIT files into the activity_trackpoints table and exit",
+    )
     parser.add_argument(
         "--visible",
         action="store_true",
@@ -348,6 +457,19 @@ examples:
         from garmin_mcp.import_json import main as import_main
 
         import_main(args.json_import)
+        return
+
+    # ── Trackpoint rebuild ─────────────────────────────────
+    if args.rebuild_trackpoints:
+        conn = get_connection()
+        init_db(conn)
+        try:
+            fit_dir = DATA_DIR / "fit"
+            summary = _parse_trackpoints_from_fit_dir(conn, fit_dir)
+            print(f"Rebuilt trackpoints from {summary['targeted']} FIT files in {fit_dir}/")
+            _print_trackpoint_summary(summary, prefix="  ")
+        finally:
+            conn.close()
         return
 
     # ── Export (from existing DB, no Garmin login needed) ───
@@ -422,6 +544,11 @@ examples:
         mode = "full"
         start = (today - timedelta(days=365 * 10)).isoformat()
         end = today.isoformat()
+    elif args.latest and not args.fit_only:
+        mode = "incremental"
+        start = today.isoformat()
+        end = today.isoformat()
+        print(f"Fetching latest data for {today.isoformat()}")
     elif args.days:
         mode = "range"
         start = (today - timedelta(days=args.days)).isoformat()
@@ -549,7 +676,7 @@ examples:
             print("Login failed!")
             sys.exit(1)
 
-        fetch_direct_to_db(client, conn, start, end)
+        fetch_direct_to_db(client, conn, start, end, save_raw=args.save_raw)
 
         # Report actual row counts from the database (not upsert operations)
         tables = db_query(
@@ -624,6 +751,14 @@ examples:
                 print(f"  FIT files: {downloaded} downloaded to {fit_dir}/")
             else:
                 print(f"\nFIT files: all {len(existing_fits)} already downloaded")
+
+            # Parse trackpoints for every FIT on disk not yet recorded in the
+            # database — covers freshly downloaded files and any kept from a
+            # previous database (e.g. a wipe + resync that retained fit/).
+            if args.parse_trackpoints:
+                summary = _backfill_unparsed_fit(conn, fit_dir)
+                if summary["targeted"]:
+                    _print_trackpoint_summary(summary, prefix="  ")
 
     finally:
         client.close()
