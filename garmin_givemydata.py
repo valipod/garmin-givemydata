@@ -706,8 +706,9 @@ examples:
                 "SELECT activity_id, activity_name, start_time_local FROM activity WHERE start_time_local IS NOT NULL ORDER BY start_time_local DESC",
             )
 
-            # Only download FIT files we don't already have
-            existing_fits = {f.stem.split("_")[1] for f in fit_dir.glob("*.fit")} if fit_dir.exists() else set()
+            # Only download FIT files we don't already have. rglob, not glob: past years
+            # are archived into per-year subfolders and would otherwise look missing.
+            existing_fits = {f.stem.split("_")[1] for f in fit_dir.rglob("*.fit")} if fit_dir.exists() else set()
             new_activities = [
                 (a["activity_id"], a["activity_name"], a["start_time_local"])
                 for a in activities
@@ -768,7 +769,7 @@ examples:
     # Final status
     final = get_db_status()
     fit_dir = _get_fit_dir()
-    fit_count = len(list(fit_dir.glob("*.fit"))) if fit_dir.exists() else 0
+    fit_count = len(list(fit_dir.rglob("*.fit"))) if fit_dir.exists() else 0
 
     print("\nDatabase status:")
     print(f"  Daily summaries: {final['rows']} days")
