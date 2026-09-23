@@ -688,6 +688,17 @@ CREATE TABLE IF NOT EXISTS activity_weather (
     raw_json                        TEXT
 );
 
+CREATE TABLE IF NOT EXISTS activity_gear (
+    activity_id                     INTEGER,
+    gear_pk                         INTEGER,
+    uuid                            TEXT,
+    display_name                    TEXT,
+    custom_make_model               TEXT,
+    gear_type                       TEXT,
+    raw_json                        TEXT,
+    PRIMARY KEY (activity_id, gear_pk)
+);
+
 CREATE TABLE IF NOT EXISTS activity_exercise_sets (
     activity_id                     INTEGER,
     set_number                      INTEGER,
@@ -3128,6 +3139,34 @@ def upsert_activity_weather(conn: sqlite3.Connection, activity_id: int, data) ->
     )
 
 
+def upsert_activity_gear(conn: sqlite3.Connection, activity_id: int, data) -> int:
+    """An activity can carry several pieces of gear; an empty list means none assigned."""
+    conn.execute("DELETE FROM activity_gear WHERE activity_id = ?", (activity_id,))
+    if not isinstance(data, list):
+        return 0
+    n = 0
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        conn.execute(
+            """INSERT OR REPLACE INTO activity_gear
+               (activity_id, gear_pk, uuid, display_name, custom_make_model,
+                gear_type, raw_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (
+                activity_id,
+                item.get("gearPk"),
+                item.get("uuid"),
+                item.get("displayName"),
+                item.get("customMakeModel"),
+                item.get("gearTypeName"),
+                json.dumps(item),
+            ),
+        )
+        n += 1
+    return n
+
+
 def upsert_activity_exercise_sets(conn: sqlite3.Connection, activity_id: int, data) -> int:
     if not data:
         return 0
@@ -4069,6 +4108,11 @@ def save_to_db(conn: sqlite3.Connection, endpoint_name: str, data, cal_date: str
             if aid:
                 upsert_activity_weather(conn, aid, data)
                 count += 1
+
+        elif name == "activity_gear":
+            aid = int(cal_date) if cal_date else None
+            if aid:
+                count += upsert_activity_gear(conn, aid, data)
 
         elif name == "activity_details":
             # Detail endpoint has a different structure (summaryDTO, activityTypeDTO)

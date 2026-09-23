@@ -165,4 +165,6 @@ def activity_detail_endpoints(activity_id: int) -> dict:
         "activity_weather": f"/gc-api/activity-service/activity/{aid}/weather",
         "activity_details": f"/gc-api/activity-service/activity/{aid}",
         "activity_exercise_sets": f"/gc-api/activity-service/activity/{aid}/exerciseSets",
+        # Gear is Connect metadata, never in the FIT, so it has to come from the API.
+        "activity_gear": f"/gc-api/gear-service/gear/filterGear?activityId={aid}",
     }
